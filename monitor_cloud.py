@@ -16,6 +16,7 @@ SmartPLAY 監控 — Cloud 版(寫入 Supabase)
 
 import os
 import sys
+import time
 import datetime
 from curl_cffi import requests as creq
 from supabase import create_client
@@ -28,27 +29,55 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# 盡量似真人瀏覽器嘅完整 header。喺 data center IP(GitHub Actions)
+# 康文署有時會回「請稍後再試」,補齊 header + retry 可以提高成功率。
+BROWSER_HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-HK,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.smartplay.lcsd.gov.hk/facilities/watchlist",
+    "Origin": "https://www.smartplay.lcsd.gov.hk",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
 
 # ------------------------------------------------------------- fetch ----
 
-def fetch_all_sessions():
-    """一個 request 用大 pageSize 攞晒(實測 2000 已足夠 1610 條)。"""
-    r = creq.get(
-        API_URL,
-        params={"pageNum": 1, "pageSize": 3000},
-        impersonate="chrome",
-        timeout=45,
-        headers={
-            "Accept": "application/json",
-            "Accept-Language": "zh-HK,zh;q=0.9,en;q=0.8",
-            "Referer": "https://www.smartplay.lcsd.gov.hk/facilities/watchlist",
-        },
-    )
-    r.raise_for_status()
-    payload = r.json()
-    if str(payload.get("code")) != "0":
-        raise RuntimeError(f"API code={payload.get('code')} msg={payload.get('message')}")
-    return (payload.get("data") or {}).get("list") or []
+def fetch_all_sessions(max_retry=5):
+    """
+    一個 request 用大 pageSize 攞晒。如果康文署回「請稍後再試」,
+    等陣再試(exponential backoff),最多試 max_retry 次。
+    """
+    last_err = None
+    for attempt in range(1, max_retry + 1):
+        try:
+            r = creq.get(
+                API_URL,
+                params={"pageNum": 1, "pageSize": 3000},
+                impersonate="chrome",
+                timeout=45,
+                headers=BROWSER_HEADERS,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            code = str(payload.get("code"))
+            if code == "0":
+                return (payload.get("data") or {}).get("list") or []
+            # 康文署話「請稍後再試」—— 等陣 retry
+            last_err = f"code={code} msg={payload.get('message')}"
+            print(f"[試 {attempt}/{max_retry}] API 唔肯俾: {last_err}")
+        except Exception as e:
+            last_err = repr(e)
+            print(f"[試 {attempt}/{max_retry}] 出錯: {last_err}")
+
+        if attempt < max_retry:
+            wait = 2 ** attempt   # 2,4,8,16 秒
+            print(f"  等 {wait}s 再試...")
+            time.sleep(wait)
+
+    raise RuntimeError(f"API 試咗 {max_retry} 次都失敗,最後: {last_err}")
 
 
 # ------------------------------------------------------------- map ----
