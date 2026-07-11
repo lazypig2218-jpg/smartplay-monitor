@@ -148,26 +148,13 @@ def run():
 
     # 1. 攞資料
     rows = fetch_all_sessions()
-    keys_today = [session_key(r) for r in rows]
     print(f"[{today}] API 攞到 {len(rows)} 條。")
 
-    # 2. 未 upsert 前,問 DB「呢批 key 邊啲已經存在」
-    #    咁就知邊啲係新(DB 冇嘅)。分批問,避免 URL 過長。
-    existing = set()
-    CH = 500
-    for i in range(0, len(keys_today), CH):
-        chunk = keys_today[i:i + CH]
-        res = sb.table("sessions").select("session_key").in_("session_key", chunk).execute()
-        existing.update(r["session_key"] for r in res.data)
-
-    new_keys = [k for k in keys_today if k not in existing]
-    new_rows = [r for r in rows if session_key(r) in set(new_keys)]
-    print(f"當中 {len(new_keys)} 個係新 release。")
-
-    # 3. Upsert 全部(on_conflict=session_key)。
-    #    first_seen_at 唔喺 payload 入面,所以:
-    #      - 新 row:DB default now() 填 first_seen_at
-    #      - 舊 row:upsert 更新其他欄位 + last_seen_at,first_seen_at 保持不變
+    # 2. 直接 upsert 全部,唔使自己查 existing。
+    #    (之前用 in_(session_key, ...) 查 existing,但 session_key 含 | 同中文,
+    #     塞落 PostgREST 個 in.(...) 會整壞 URL,回 400。改用純 upsert 更穩。)
+    #    靠 DB:新 row default 填 first_seen_at=now();舊 row upsert 唔覆蓋
+    #    first_seen_at(payload 冇呢欄),只更新其他欄位 + last_seen_at。
     db_rows = [to_db_row(r, now_iso) for r in rows]
 
     # 同一批入面如果有重複 session_key,upsert 會炒。先去重(留最後一個)。
@@ -177,31 +164,39 @@ def run():
     db_rows = list(dedup.values())
     print(f"去重後準備寫入 {len(db_rows)} 條。")
 
+    CH = 500
     for i in range(0, len(db_rows), CH):
         batch = db_rows[i:i + CH]
         try:
             sb.table("sessions").upsert(batch, on_conflict="session_key").execute()
         except Exception as e:
             print(f"[upsert 錯誤] 第 {i}-{i+len(batch)} 批失敗: {e!r}")
-            # 印第一條 record 出嚟睇下咩格式頂唔順
-            print("  問題批第一條:", json.dumps(batch[0], ensure_ascii=False, default=str)[:500])
+            print("  問題批第一條:",
+                  json.dumps(batch[0], ensure_ascii=False, default=str)[:500])
             raise
+
+    # 3. 搵今次新 release:first_seen_at >= 今次 run 開始時間。
+    #    新 insert 嘅 row first_seen_at ≈ now(會中);舊 row 保持舊時間(唔會中)。
+    res = sb.table("sessions").select("*").gte("first_seen_at", now_iso).execute()
+    new_rows = res.data or []
+    print(f"當中 {len(new_rows)} 個係新 release。")
 
     # 4. 記錄今次跑批
     sb.table("scrape_runs").insert({
         "total_fetched": len(rows),
-        "new_count": len(new_keys),
+        "new_count": len(new_rows),
         "ok": True,
-        "note": f"{len(existing)} existing",
+        "note": f"upserted {len(db_rows)}",
     }).execute()
 
     # 5. 通知(第一階段:ntfy。第二階段會改成按用戶偏好 FCM)
+    #    注意:new_rows 由 DB 查返嚟,用嘅係 DB 欄位名(snake_case)。
     if new_rows:
-        new_rows.sort(key=lambda r: (r.get("ssnStartDate", ""), r.get("ssnStartTime", "")))
+        new_rows.sort(key=lambda r: (r.get("ssn_date") or "", r.get("ssn_start") or ""))
         lines = [
-            f"{r.get('venueName')} — {r.get('frmName')}  "
-            f"{r.get('ssnStartDate')} {r.get('ssnStartTime')}-{r.get('ssnEndTime')}  "
-            f"({(r.get('distName') or '').strip()})"
+            f"{r.get('venue_name')} — {r.get('frm_name')}  "
+            f"{r.get('ssn_date')} {r.get('ssn_start')}-{r.get('ssn_end')}  "
+            f"({(r.get('dist_name') or '').strip()})"
             for r in new_rows[:30]
         ]
         more = f"\n…仲有 {len(new_rows) - 30} 個" if len(new_rows) > 30 else ""
