@@ -40,4 +40,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          HK_PROXY: ${{ secrets.HK_PROXY }}
         run: python monitor_cloud.py
