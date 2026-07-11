@@ -16,6 +16,7 @@ SmartPLAY 監控 — Cloud 版(寫入 Supabase)
 
 import os
 import sys
+import json
 import time
 import datetime
 from curl_cffi import requests as creq
@@ -97,22 +98,39 @@ def session_key(row):
                     ("venueId", "frmId", "ssnStartDate", "ssnStartTime", "ssnEndTime"))
 
 
+def _clean_date(v):
+    """空字串 / None -> None(Postgres date 唔收 '')。"""
+    if v is None or (isinstance(v, str) and v.strip() == ""):
+        return None
+    return v
+
+
+def _clean_int(v):
+    """空字串 -> None,數字字串 -> int。"""
+    if v is None or (isinstance(v, str) and v.strip() == ""):
+        return None
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
+
 def to_db_row(row, now_iso):
     """API record -> Supabase row。"""
     return {
         "session_key": session_key(row),
-        "fat_id": row.get("fatId"),
+        "fat_id": _clean_int(row.get("fatId")),
         "fat_name": row.get("fatName"),
-        "venue_id": row.get("venueId"),
+        "venue_id": _clean_int(row.get("venueId")),
         "venue_name": row.get("venueName"),
         "dist_code": row.get("distCode"),
         "dist_name": (row.get("distName") or "").strip(),
-        "frm_id": row.get("frmId"),
+        "frm_id": _clean_int(row.get("frmId")),
         "frm_name": row.get("frmName"),
-        "ssn_date": row.get("ssnStartDate"),
+        "ssn_date": _clean_date(row.get("ssnStartDate")),
         "ssn_start": row.get("ssnStartTime"),
         "ssn_end": row.get("ssnEndTime"),
-        "rel_datetime": row.get("relDatetime"),
+        "rel_datetime": _clean_date(row.get("relDatetime")),
         "bookable": bool(row.get("bookable")),
         "raw": row,
         "last_seen_at": now_iso,          # 每次都更新「最近見到」
@@ -151,10 +169,23 @@ def run():
     #      - 新 row:DB default now() 填 first_seen_at
     #      - 舊 row:upsert 更新其他欄位 + last_seen_at,first_seen_at 保持不變
     db_rows = [to_db_row(r, now_iso) for r in rows]
+
+    # 同一批入面如果有重複 session_key,upsert 會炒。先去重(留最後一個)。
+    dedup = {}
+    for r in db_rows:
+        dedup[r["session_key"]] = r
+    db_rows = list(dedup.values())
+    print(f"去重後準備寫入 {len(db_rows)} 條。")
+
     for i in range(0, len(db_rows), CH):
-        sb.table("sessions").upsert(
-            db_rows[i:i + CH], on_conflict="session_key"
-        ).execute()
+        batch = db_rows[i:i + CH]
+        try:
+            sb.table("sessions").upsert(batch, on_conflict="session_key").execute()
+        except Exception as e:
+            print(f"[upsert 錯誤] 第 {i}-{i+len(batch)} 批失敗: {e!r}")
+            # 印第一條 record 出嚟睇下咩格式頂唔順
+            print("  問題批第一條:", json.dumps(batch[0], ensure_ascii=False, default=str)[:500])
+            raise
 
     # 4. 記錄今次跑批
     sb.table("scrape_runs").insert({
