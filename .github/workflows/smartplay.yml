@@ -1,0 +1,43 @@
+# .github/workflows/smartplay.yml
+# 每日自動跑 SmartPLAY 監控(免費,用 GitHub Actions scheduled workflow)
+#
+# 設定步驟:
+#   1. 將 monitor_cloud.py 同 requirements.txt 放入 repo。
+#   2. 呢個檔放喺 repo 嘅 .github/workflows/smartplay.yml。
+#   3. Repo -> Settings -> Secrets and variables -> Actions -> New secret,
+#      加以下 3 個(名要一模一樣):
+#        SUPABASE_URL
+#        SUPABASE_SERVICE_KEY
+#        NTFY_TOPIC        (可選)
+#   4. push 上 GitHub 就會自動按時跑。
+#      想即刻試:去 Actions tab -> 揀呢個 workflow -> Run workflow(手動觸發)。
+
+name: SmartPLAY Daily Monitor
+
+on:
+  schedule:
+    # cron 用 UTC。香港 07:05 = UTC 前一日 23:05。
+    # 康文署一般 7am 放場,想貼住就用呢個。
+    - cron: "5 23 * * *"
+  workflow_dispatch: {}   # 允許喺 Actions 頁面手動 Run
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor_cloud.py
