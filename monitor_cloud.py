@@ -27,6 +27,12 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 
+# 香港 proxy(過康文署對非香港 IP 嘅封鎖)。
+# 格式例:"http://user:pass@host:port" 或 "http://host:port"
+# 冇設就直連(本機香港網絡跑得,唔使 proxy)。
+HK_PROXY = os.environ.get("HK_PROXY")
+PROXIES = {"http": HK_PROXY, "https": HK_PROXY} if HK_PROXY else None
+
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # 盡量似真人瀏覽器嘅完整 header。喺 data center IP(GitHub Actions)
@@ -51,6 +57,9 @@ def fetch_all_sessions(max_retry=5):
     等陣再試(exponential backoff),最多試 max_retry 次。
     """
     last_err = None
+    if HK_PROXY:
+        # 唔好 print 埋密碼,只講有冇用 proxy
+        print(f"經 proxy 出去:{HK_PROXY.split('@')[-1]}")
     for attempt in range(1, max_retry + 1):
         try:
             r = creq.get(
@@ -59,6 +68,7 @@ def fetch_all_sessions(max_retry=5):
                 impersonate="chrome",
                 timeout=45,
                 headers=BROWSER_HEADERS,
+                proxies=PROXIES,
             )
             r.raise_for_status()
             payload = r.json()
