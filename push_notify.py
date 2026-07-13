@@ -1,0 +1,343 @@
+"""
+SmartPlay 監測 —— 每朝 push 通知
+==================================
+喺 monitor_cloud.py scrape 完 release-log 之後跑。
+
+流程:
+  1. 攞晒 enabled 嘅 watches
+  2. 逐條 match sessions(日期 + 運動細項 + 地區 + 場地 + 時段)
+  3. 只要「新」嘅 —— 即係:
+       • session 係喺 watch 建立【之後】先出現(first_seen_at >= created_at)
+       • 而且未 push 過(唔喺 watch_hits)
+  4. Expo Push API 送通知(免費,唔使 Firebase)
+  5. 記入 watch_hits(下次唔會再報同一個場)
+  6. expire_watches() 清走用場日已經過咗嘅 watch
+
+環境變數(GitHub Secrets):
+  SUPABASE_URL
+  SUPABASE_SERVICE_KEY
+"""
+
+import os
+import sys
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+
+import requests
+from supabase import create_client
+
+HK = timezone(timedelta(hours=8))
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+# ─────────────────────────────────────────────────────────────
+# 設施分類 —— 同 app 個 src/constants/smartplay.js 一致
+# ⚠ 次序好重要:名有包含關係嘅要排前
+#   (「人造草地美式足球場」含「足球」;「滑浪風帆」含「風帆」)
+# ─────────────────────────────────────────────────────────────
+TYPES = [
+    # football
+    ("fb_us",       ["美式足球"]),
+    ("fb_standard", ["標準足球場"]),
+    ("fb_turf_sm",  ["小型人造草地足球"]),
+    ("fb_turf",     ["人造草地足球"]),
+    ("fb_7",        ["七人硬地足球"]),
+    ("fb_5",        ["五人硬地足球"]),
+    ("fb_small",    ["小型足球場"]),
+    # tennis
+    ("tn_free_prac", ["免費網球場練習場"]),
+    ("tn_prac",      ["網球練習場"]),
+    ("tn_hard",      ["硬地網球場"]),
+    ("tn_court",     ["網球場"]),
+    # badminton
+    ("bd_out", ["戶外羽毛球"]),
+    ("bd_ac",  ["羽毛球場 (空調)"]),
+    ("bd_in",  ["羽毛球場"]),
+    # basketball
+    ("bk_prac", ["籃球場練習場"]),
+    ("bk_out",  ["戶外籃球"]),
+    ("bk_ac",   ["籃球場 (空調)"]),
+    ("bk_in",   ["籃球場"]),
+    # table tennis
+    ("tt_machine", ["乒乓球檯及發球機"]),
+    ("tt_ac",      ["乒乓球檯 (空調)"]),
+    ("tt_noac",    ["乒乓球檯 (無空調)"]),
+    ("tt_other",   ["乒乓球檯"]),
+    # squash
+    ("sq_ac", ["壁球場 (空調)"]),
+    ("sq_in", ["壁球場"]),
+    # volleyball
+    ("vb_beach", ["沙灘排球"]),
+    ("vb_out",   ["戶外排球"]),
+    ("vb_ac",    ["排球場 (空調)"]),
+    ("vb_in",    ["排球場"]),
+    # 其他陸上
+    ("pk_out",  ["匹克球"]),
+    ("cl_out",  ["攀登"]),
+    ("gf_tee",  ["高爾夫"]),
+    ("lb_in",   ["室內草地滾球"]),
+    ("lb_out",  ["草地滾球"]),
+    ("gb",      ["門球"]),
+    ("hb",      ["手球"]),
+    ("nb",      ["投球"]),
+    ("bl_us",   ["美式桌球"]),
+    ("bl_uk",   ["英式桌球"]),
+    ("ck_prac", ["板球練習場"]),
+    ("ck_hard", ["硬地板球"]),
+    # 水上(「滑浪」要排喺「風帆」前)
+    ("sf", ["滑浪"]),
+    ("ws", ["風帆"]),
+]
+
+SPORT_LABEL = {
+    "football": "⚽ 足球", "tennis": "🎾 網球", "badminton": "🏸 羽毛球",
+    "basketball": "🏀 籃球", "tabletennis": "🏓 乒乓球", "squash": "🎯 壁球",
+    "volleyball": "🏐 排球", "pickleball": "🥒 匹克球", "climbing": "🧗 攀登牆",
+    "golf": "⛳ 高爾夫球", "lawnbowls": "🎳 草地滾球", "gateball": "🥎 門球",
+    "handball": "🤾 手球", "netball": "🏐 投球", "billiards": "🎱 桌球",
+    "cricket": "🏏 板球", "surfing": "🏄 滑浪風帆", "windsurf": "⛵ 風帆",
+}
+
+HIDDEN = ["月票", "健身器材", "活動室", "舞蹈室", "套票"]
+
+
+def type_of(fat_name: str):
+    """一個 fat_name 對應邊個細項 key(第一個夾中嘅贏)。"""
+    if not fat_name:
+        return None
+    for key, kws in TYPES:
+        if any(k in fat_name for k in kws):
+            return key
+    return None
+
+
+def is_hidden(fat_name: str) -> bool:
+    return any(k in (fat_name or "") for k in HIDDEN)
+
+
+def parse_ts(s):
+    """Supabase timestamptz -> aware datetime。"""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+# ─────────────────────────────────────────────────────────────
+def matches(watch, s) -> bool:
+    """一條 session 啱唔啱一條 watch?"""
+    if not s.get("bookable"):
+        return False
+    if is_hidden(s.get("fat_name")):
+        return False
+
+    if s.get("ssn_date") not in (watch.get("play_dates") or []):
+        return False
+
+    hours = watch.get("hours") or []
+    if hours and s.get("ssn_start") not in hours:
+        return False
+
+    dists = watch.get("dist_codes") or []
+    if dists and s.get("dist_code") not in dists:
+        return False
+
+    venues = watch.get("venue_ids") or []
+    if venues and s.get("venue_id") not in venues:
+        return False
+
+    tkeys = watch.get("type_keys") or []
+    if tkeys and type_of(s.get("fat_name")) not in tkeys:
+        return False
+
+    return True
+
+
+def send_expo(messages):
+    """Expo Push API,一次最多 100 條。回傳 (成功數, 壞 token set)。"""
+    ok = 0
+    dead_tokens = set()
+
+    for i in range(0, len(messages), 100):
+        chunk = messages[i:i + 100]
+        try:
+            r = requests.post(
+                EXPO_PUSH_URL,
+                json=chunk,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            body = r.json()
+        except Exception as e:
+            print(f"  ❌ Expo push 出錯: {e!r}")
+            continue
+
+        for msg, res in zip(chunk, body.get("data", [])):
+            if res.get("status") == "ok":
+                ok += 1
+            else:
+                err = (res.get("details") or {}).get("error")
+                print(f"  ⚠ push 失敗 {msg['to'][:24]}… : {res.get('message')}")
+                if err == "DeviceNotRegistered":
+                    dead_tokens.add(msg["to"])
+
+    return ok, dead_tokens
+
+
+# ─────────────────────────────────────────────────────────────
+def main():
+    now_hk = datetime.now(HK)
+    print(f"=== push 通知 · 香港時間 {now_hk:%Y-%m-%d %H:%M} ===\n")
+
+    # 1. enabled 嘅 watches
+    watches = (sb.table("watches").select("*")
+               .eq("enabled", True).execute().data or [])
+    if not watches:
+        print("冇 watch,收工。")
+        expire()
+        return
+    print(f"{len(watches)} 條 watch")
+
+    # 2. 用戶 push token
+    uids = list({w["user_id"] for w in watches})
+    users = (sb.table("app_users").select("id, push_token")
+             .in_("id", uids).execute().data or [])
+    token_of = {u["id"]: u.get("push_token") for u in users if u.get("push_token")}
+    print(f"{len(token_of)} 個有 push token")
+
+    # 3. 相關日期嘅 sessions(一次過攞,唔好逐條 watch 打 DB)
+    all_dates = sorted({d for w in watches for d in (w.get("play_dates") or [])})
+    if not all_dates:
+        print("冇日期,收工。")
+        expire()
+        return
+
+    sessions = []
+    PAGE = 1000
+    frm = 0
+    while True:
+        rows = (sb.table("sessions").select("*")
+                .in_("ssn_date", all_dates)
+                .eq("bookable", True)
+                .range(frm, frm + PAGE - 1).execute().data or [])
+        sessions.extend(rows)
+        if len(rows) < PAGE:
+            break
+        frm += PAGE
+    print(f"{len(sessions)} 條相關 session\n")
+
+    # 4. 已 push 過嘅(避免重複報同一個場)
+    wids = [w["id"] for w in watches]
+    hits = (sb.table("watch_hits").select("watch_id, session_key")
+            .in_("watch_id", wids).execute().data or [])
+    pushed = defaultdict(set)
+    for h in hits:
+        pushed[h["watch_id"]].add(h["session_key"])
+
+    # 5. 逐條 watch match
+    messages = []
+    new_hits = []
+
+    for w in watches:
+        token = token_of.get(w["user_id"])
+        created = parse_ts(w.get("created_at"))
+        already = pushed[w["id"]]
+
+        fresh = []
+        for s in sessions:
+            if s["session_key"] in already:
+                continue
+            if not matches(w, s):
+                continue
+            # ★ 只要 watch 建立【之後】先出現嘅場 ——
+            #   唔好一 save 就將舊 release 全部 push(app 卡片已經顯示緊)
+            seen = parse_ts(s.get("first_seen_at"))
+            if created and seen and seen < created:
+                # 舊 release:記低當已處理,但唔 push
+                new_hits.append({"watch_id": w["id"],
+                                 "session_key": s["session_key"]})
+                already.add(s["session_key"])
+                continue
+            fresh.append(s)
+
+        if not fresh:
+            continue
+
+        sport = SPORT_LABEL.get(w.get("sport_key"), w.get("sport_key"))
+        venues = sorted({s["venue_name"] for s in fresh})
+        dates = sorted({s["ssn_date"] for s in fresh})
+
+        title = f"{sport} · {len(fresh)} 個新場"
+        head = "、".join(venues[:2])
+        if len(venues) > 2:
+            head += f" 等 {len(venues)} 個場"
+        dpart = "、".join(d[5:].replace("-", "/") for d in dates[:3])
+        body = f"{head} · {dpart} 有人退場,快啲去訂!"
+
+        print(f"  📣 {title} -> {head}")
+
+        if token:
+            messages.append({
+                "to": token,
+                "title": title,
+                "body": body,
+                "sound": "default",
+                "data": {"watchId": w["id"], "count": len(fresh)},
+            })
+        else:
+            print("     (冇 push token,skip)")
+
+        for s in fresh:
+            new_hits.append({"watch_id": w["id"],
+                             "session_key": s["session_key"]})
+
+    # 6. 送
+    if messages:
+        print(f"\n送緊 {len(messages)} 個通知…")
+        ok, dead = send_expo(messages)
+        print(f"成功 {ok} / {len(messages)}")
+        for t in dead:
+            print(f"  清走死 token {t[:24]}…")
+            sb.table("app_users").update({"push_token": None}) \
+              .eq("push_token", t).execute()
+    else:
+        print("\n冇新場,唔使 push。")
+
+    # 7. 記低(唔好重複 push)
+    if new_hits:
+        for i in range(0, len(new_hits), 500):
+            sb.table("watch_hits").upsert(
+                new_hits[i:i + 500],
+                on_conflict="watch_id,session_key",
+            ).execute()
+        print(f"記低 {len(new_hits)} 條 hit")
+
+    expire()
+
+
+def expire():
+    """用場日全部過咗嘅 watch,自動清走。"""
+    try:
+        r = sb.rpc("expire_watches").execute()
+        n = r.data if isinstance(r.data, int) else 0
+        print(f"\n清走 {n} 條過期 watch")
+    except Exception as e:
+        print(f"\n⚠ expire_watches 出錯: {e!r}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"\n❌ 出錯: {e!r}")
+        sys.exit(1)
