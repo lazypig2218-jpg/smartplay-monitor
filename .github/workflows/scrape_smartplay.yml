@@ -1,0 +1,28 @@
+name: 1. Scrape 康文署
+
+# 康文署 01:00 update -> 我哋 02:00 scrape。
+# 咁 07:00 開放搶場之前,早幾個鐘就已經知有咩新場。
+
+on:
+  schedule:
+    - cron: "0 18 * * *"      # UTC 18:00 = 香港 02:00(下一日)
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      # 要香港 proxy —— GitHub 美國 IP 會俾康文署封
+      - name: Scrape 已取消再開放嘅場
+        env:
+          HK_PROXY: ${{ secrets.HK_PROXY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python monitor_cloud.py
