@@ -1,0 +1,41 @@
+name: 2. Push 通知
+
+# 每個鐘跑一次,只推俾「而家啱啱係佢設定時間」嗰班用戶。
+#
+# 點解要每個鐘:每個用戶可以自己揀幾點收通知
+# (有人想 06:00 慢慢諗,有人想 06:55 臨開閘先睇)。
+# Script 會自己 check 香港時間,唔關嗰個鐘事嘅用戶會 skip。
+#
+# GitHub Actions 個 cron 可能遲幾分鐘,對 06:00 推、07:00 搶場嚟講冇問題。
+
+on:
+  schedule:
+    - cron: "0 * * * *"       # 每個鐘正 (UTC)
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: "唔理設定時間,全部用戶都 push"
+        type: boolean
+        default: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Match watches -> Expo push
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ "${{ inputs.force_all }}" = "true" ]; then
+            python push_notify.py --all
+          else
+            python push_notify.py
+          fi
