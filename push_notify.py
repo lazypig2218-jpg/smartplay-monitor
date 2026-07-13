@@ -1,7 +1,13 @@
 """
-SmartPlay 監測 —— 每朝 push 通知
-==================================
-喺 monitor_cloud.py scrape 完 release-log 之後跑。
+SmartPlay 監測 —— push 通知
+============================
+時間表(香港時間):
+    01:00  康文署 update
+    02:00  scrape_smartplay.yml 去 scrape
+    ??:00  呢個 script push(每個鐘跑一次,只推俾設定咗嗰個鐘嘅用戶)
+    07:00  開放搶場
+
+即係用戶喺開放前幾個鐘就知有咩新場,有時間準備 —— 呢個先係個 app 嘅價值。
 
 流程:
   1. 攞晒 enabled 嘅 watches
@@ -16,6 +22,10 @@ SmartPlay 監測 —— 每朝 push 通知
 環境變數(GitHub Secrets):
   SUPABASE_URL
   SUPABASE_SERVICE_KEY
+
+參數:
+  --hour N   當作而家係香港時間 N 點(測試用)
+  --all      唔理用戶設定嘅時間,全部都 push(手動 trigger 用)
 """
 
 import os
@@ -197,7 +207,15 @@ def send_expo(messages):
 # ─────────────────────────────────────────────────────────────
 def main():
     now_hk = datetime.now(HK)
-    print(f"=== push 通知 · 香港時間 {now_hk:%Y-%m-%d %H:%M} ===\n")
+
+    # 而家係香港幾點(可以用 --hour 覆蓋嚟測試)
+    hour = now_hk.hour
+    push_all = "--all" in sys.argv
+    if "--hour" in sys.argv:
+        hour = int(sys.argv[sys.argv.index("--hour") + 1])
+
+    print(f"=== push 通知 · 香港 {now_hk:%Y-%m-%d} {hour:02d} 點"
+          f"{' (--all)' if push_all else ''} ===\n")
 
     # 1. enabled 嘅 watches
     watches = (sb.table("watches").select("*")
@@ -208,12 +226,28 @@ def main():
         return
     print(f"{len(watches)} 條 watch")
 
-    # 2. 用戶 push token
+    # 2. 用戶 push token + 佢哋揀咗幾點收
     uids = list({w["user_id"] for w in watches})
-    users = (sb.table("app_users").select("id, push_token")
+    users = (sb.table("app_users").select("id, push_token, push_hour")
              .in_("id", uids).execute().data or [])
-    token_of = {u["id"]: u.get("push_token") for u in users if u.get("push_token")}
-    print(f"{len(token_of)} 個有 push token")
+
+    # ★ 只服務「而家啱啱係佢設定時間」嗰班人
+    token_of = {}
+    for u in users:
+        if not u.get("push_token"):
+            continue
+        if push_all or (u.get("push_hour", 6) == hour):
+            token_of[u["id"]] = u["push_token"]
+
+    if not token_of:
+        print(f"冇人揀咗 {hour:02d} 點收通知,收工。")
+        expire()
+        return
+    print(f"{len(token_of)} 個用戶揀咗 {hour:02d} 點收")
+
+    # 唔關呢個鐘事嘅 watch,今次唔使理
+    watches = [w for w in watches if w["user_id"] in token_of]
+    print(f"{len(watches)} 條 watch 要處理")
 
     # 3. 相關日期嘅 sessions(一次過攞,唔好逐條 watch 打 DB)
     all_dates = sorted({d for w in watches for d in (w.get("play_dates") or [])})
@@ -286,16 +320,13 @@ def main():
 
         print(f"  📣 {title} -> {head}")
 
-        if token:
-            messages.append({
-                "to": token,
-                "title": title,
-                "body": body,
-                "sound": "default",
-                "data": {"watchId": w["id"], "count": len(fresh)},
-            })
-        else:
-            print("     (冇 push token,skip)")
+        messages.append({
+            "to": token,
+            "title": title,
+            "body": body,
+            "sound": "default",
+            "data": {"watchId": w["id"], "count": len(fresh)},
+        })
 
         for s in fresh:
             new_hits.append({"watch_id": w["id"],
