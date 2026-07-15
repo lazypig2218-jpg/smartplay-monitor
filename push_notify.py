@@ -192,9 +192,15 @@ def matches(watch, s) -> bool:
 
 
 def send_expo(messages):
-    """Expo Push API,一次最多 100 條。回傳 (成功數, 壞 token set)。"""
+    """
+    Expo Push API,一次最多 100 條。
+    回傳 (成功數, 壞 token set, 成功索引 set) ——
+    最後嗰個俾主流程知邊幾條 message 真係送成功,先好記入
+    notifications_sent(「最近通知」清單淨係想顯示真係送咗嘅)。
+    """
     ok = 0
     dead_tokens = set()
+    sent_idx = set()
 
     for i in range(0, len(messages), 100):
         chunk = messages[i:i + 100]
@@ -214,16 +220,17 @@ def send_expo(messages):
             print(f"  ❌ Expo push 出錯: {e!r}")
             continue
 
-        for msg, res in zip(chunk, body.get("data", [])):
+        for j, (msg, res) in enumerate(zip(chunk, body.get("data", []))):
             if res.get("status") == "ok":
                 ok += 1
+                sent_idx.add(i + j)
             else:
                 err = (res.get("details") or {}).get("error")
                 print(f"  ⚠ push 失敗 {msg['to'][:24]}… : {res.get('message')}")
                 if err == "DeviceNotRegistered":
                     dead_tokens.add(msg["to"])
 
-    return ok, dead_tokens
+    return ok, dead_tokens, sent_idx
 
 
 # ─────────────────────────────────────────────────────────────
@@ -303,6 +310,7 @@ def main():
     # 5. 逐條 watch match
     messages = []
     new_hits = []
+    notif_records = []   # 同 messages 一一對應,用嚟寫 notifications_sent
 
     for w in watches:
         token = token_of.get(w["user_id"])
@@ -349,6 +357,13 @@ def main():
             "sound": "default",
             "data": {"watchId": w["id"], "count": len(fresh)},
         })
+        notif_records.append({
+            "user_id": w["user_id"],
+            "watch_id": w["id"],
+            "sport_key": w.get("sport_key"),
+            "summary": body,
+            "session_count": len(fresh),
+        })
 
         for s in fresh:
             new_hits.append({"watch_id": w["id"],
@@ -357,12 +372,21 @@ def main():
     # 6. 送
     if messages:
         print(f"\n送緊 {len(messages)} 個通知…")
-        ok, dead = send_expo(messages)
+        ok, dead, sent_idx = send_expo(messages)
         print(f"成功 {ok} / {len(messages)}")
         for t in dead:
             print(f"  清走死 token {t[:24]}…")
             sb.table("app_users").update({"push_token": None}) \
               .eq("push_token", t).execute()
+
+        # 記低「最近通知」——淨係記真係送成功嗰啲
+        sent_records = [notif_records[i] for i in sent_idx]
+        if sent_records:
+            try:
+                sb.table("notifications_sent").insert(sent_records).execute()
+                print(f"記低 {len(sent_records)} 條「最近通知」")
+            except Exception as e:
+                print(f"  ⚠ 寫 notifications_sent 失敗(唔緊要): {e!r}")
     else:
         print("\n冇新場,唔使 push。")
 
