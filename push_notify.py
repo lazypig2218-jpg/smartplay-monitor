@@ -145,14 +145,14 @@ TYPES = [
 # push 標題會出返個英文 raw key,好肉酸)
 SPORT_LABEL = {
     "football": "⚽ 足球", "tennis": "🎾 網球", "badminton": "🏸 羽毛球",
-    "basketball": "🏀 籃球", "tabletennis": "🏓 乒乓球", "squash": "🎯 壁球",
+    "basketball": "🏀 籃球", "tabletennis": "🏓 乒乓球", "squash": "壁球",
     "volleyball": "🏐 排球", "baseball": "⚾ 棒球",
-    "archery": "🏹 箭藝", "pickleball": "🥒 匹克球", "climbing": "🧗 攀登牆",
-    "golf": "⛳ 高爾夫球", "lawnbowls": "🎳 草地滾球", "gateball": "🥎 門球",
-    "handball": "🤾 手球", "netball": "🏐 投球", "billiards": "🎱 桌球",
+    "archery": "🏹 箭藝", "pickleball": "匹克球", "climbing": "🧗 攀登牆",
+    "golf": "⛳ 高爾夫球", "lawnbowls": "草地滾球", "gateball": "門球",
+    "handball": "🤾 手球", "netball": "投球", "billiards": "🎱 桌球",
     "cricket": "🏏 板球", "hockey": "🏑 曲棍球", "rollerhockey": "🛼 滾軸曲棍球",
-    "rugby": "🏉 橄欖球", "kinball": "🏐 健球", "korfball": "🏐 合球",
-    "dodgeball": "🥏 躲避盤/閃避球", "tchoukball": "🏐 巧固球",
+    "rugby": "🏉 橄欖球", "kinball": "健球", "korfball": "合球",
+    "dodgeball": "🥏 躲避盤/閃避球", "tchoukball": "巧固球",
     "dance": "💃 舞蹈", "multi": "🏟️ 多用途活動", "ropenet": "🪢 繩網活動",
     "trackcycle": "🚴 場地單車", "amphitheatre": "🎭 露天劇場",
     "surfing": "🏄 滑浪風帆", "windsurf": "⛵ 風帆", "canoe": "🛶 獨木舟",
@@ -160,6 +160,47 @@ SPORT_LABEL = {
 
 # 健身器材/健身室係「入場制」,冇人會監測;月票/套票係優惠組合產品。
 HIDDEN = ["月票", "套票", "健身器材", "健身室"]
+
+# sport_key -> 該運動之下全部細項 key(同 app typeKeysOfSport 一致)。
+# ⚠ 用嚟頂返「type_keys 空」嘅 watch —— 空嘅話唔可以當「唔篩」,
+#   因為 session 冇 sport_key,唔篩 = match 曬所有運動。空就 fallback
+#   落嗰個運動全部細項,收窄返。
+SPORT_TYPES = {
+    "football": ["fb_free", "fb_us", "fb_standard", "fb_turf_sm", "fb_turf",
+                 "fb_7", "fb_5", "fb_small"],
+    "tennis": ["tn_free_prac", "tn_prac", "tn_hard", "tn_court", "tn_main"],
+    "badminton": ["bd_free", "bd_out", "bd_ac", "bd_in"],
+    "basketball": ["bk_free", "bk_prac", "bk_out", "bk_ac", "bk_in"],
+    "tabletennis": ["tt_free", "tt_machine", "tt_ac", "tt_noac", "tt_other"],
+    "squash": ["sq_ac", "sq_in", "sq_show"],
+    "volleyball": ["vb_beach_free", "vb_free", "vb_beach", "vb_out", "vb_ac", "vb_in"],
+    "baseball": ["bb_free", "bb_prac", "bb"],
+    "archery": ["ar_free", "ar"],
+    "pickleball": ["pk_free", "pk_out"],
+    "climbing": ["cl_free", "cl_out"],
+    "golf": ["gf_tee"],
+    "lawnbowls": ["lb_in", "lb_out"],
+    "gateball": ["gb_free", "gb"],
+    "handball": ["hb_beach", "hb_free", "hb"],
+    "netball": ["nb_free", "nb"],
+    "billiards": ["bl_us", "bl_uk", "bl_crown"],
+    "cricket": ["ck_free", "ck_prac", "ck_hard", "ck"],
+    "hockey": ["hk_turf", "hk"],
+    "rollerhockey": ["rh"],
+    "rugby": ["rg"],
+    "kinball": ["kb"],
+    "korfball": ["kf"],
+    "dodgeball": ["db1", "db2"],
+    "tchoukball": ["tb"],
+    "dance": ["dn"],
+    "multi": ["mu"],
+    "ropenet": ["rn"],
+    "trackcycle": ["tc"],
+    "amphitheatre": ["amp"],
+    "surfing": ["sf"],
+    "windsurf": ["ws"],
+    "canoe": ["ca"],
+}
 
 
 def type_of(fat_name: str):
@@ -209,7 +250,8 @@ def matches(watch, s) -> bool:
     if venues and s.get("venue_id") not in venues:
         return False
 
-    tkeys = watch.get("type_keys") or []
+    # type_keys 空 -> fallback 落嗰個運動全部細項(唔可以當「唔篩」)
+    tkeys = watch.get("type_keys") or SPORT_TYPES.get(watch.get("sport_key"), [])
     if tkeys and type_of(s.get("fat_name")) not in tkeys:
         return False
 
@@ -348,11 +390,15 @@ def main():
                 continue
             if not matches(w, s):
                 continue
-            # ★ 只要 watch 建立【之後】先出現嘅場 ——
-            #   唔好一 save 就將舊 release 全部 push(app 卡片已經顯示緊)
             seen = parse_ts(s.get("first_seen_at"))
-            if created and seen and seen < created:
-                # 舊 release:記低當已處理,但唔 push
+            # ★ 只 push「今日先放出嚟」嘅場 —— 兩重篩,同 app countMatches 一致:
+            #   1. 監測建立之後先出現(唔好一 save 就將舊 release 全部 push)
+            #   2. first_seen 係香港今日(舊 release 好大機會已經俾人訂走,
+            #      通知出去只會嘥用戶時間,只報今日新放先有搶場價值)
+            is_old = created and seen and seen < created
+            is_today = seen and seen.astimezone(HK).date() == now_hk.date()
+            if is_old or not is_today:
+                # 唔符合:記低當已處理(下次唔使再 check),但唔 push
                 new_hits.append({"watch_id": w["id"],
                                  "session_key": s["session_key"]})
                 already.add(s["session_key"])
