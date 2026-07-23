@@ -1,14 +1,14 @@
 name: 保溫 availability cache
 
-# 康文署 open data 每 5 分鐘更新,Edge Function cache TTL 都係 5 分鐘。
+# 康文署 open data 每 5 分鐘更新,Edge Function cache TTL 30 分鐘。
 # 每 10 分鐘主動 call 一次,令 cache 永遠係熱嘅 ——
 # 用戶撳「搵場」就秒開,唔使等 10 秒去拉 5-9MB。
 #
-# 對比「app 一開就拉」:
-#   ✗ 好多用戶根本唔用搵場 tab -> 白拉
-#   ✗ 只熱到一個運動 -> 揀第二個一樣要等
-#   ✗ cache 一過期,下個開 app 嘅用戶就「食」嗰 10 秒
-#   ✓ cron 保溫:一日 4 運動 × 144 次 = 576 次 invocation,微不足道
+# ⚠ 用 warm:true 模式 —— function 淨係 refresh cache,唔會回傳成份資料
+#   (舊版每次攞返 ~50KB,5 個運動 × 144 次/日,一個月白燒成 GB egress)。
+#
+# 運動清單要同 app 個 OD_SPORTS / edge function 個 SPORTS 一致:
+#   tennis badminton basketball volleyball football
 
 on:
   schedule:
@@ -19,22 +19,19 @@ jobs:
   warm:
     runs-on: ubuntu-latest
     steps:
-      - name: 逐個運動 call 一次 Edge Function
+      - name: 逐個運動 warm 一次 Edge Function
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           set -e
-          TODAY=$(TZ=Asia/Hong_Kong date +%F)
-          echo "香港今日: $TODAY"
-
-          for SPORT in tennis badminton basketball volleyball; do
+          for SPORT in tennis badminton basketball volleyball football; do
             echo "--- $SPORT ---"
             CODE=$(curl -s -o /tmp/out.json -w "%{http_code}" \
               -X POST "$SUPABASE_URL/functions/v1/availability" \
               -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
               -H "Content-Type: application/json" \
-              -d "{\"sport\":\"$SPORT\",\"date\":\"$TODAY\"}" \
+              -d "{\"sport\":\"$SPORT\",\"warm\":true}" \
               --max-time 120)
 
             if [ "$CODE" != "200" ]; then
@@ -42,10 +39,7 @@ jobs:
               head -c 300 /tmp/out.json || true
               echo
             else
-              # 印下攞到幾多條 + 有冇真係去官方 refresh
-              node -e "
-                const d = require('/tmp/out.json');
-                console.log(\`  refreshed=\${d.refreshed} venues=\${(d.venues||[]).length} slots=\${d.count}\`);
-              " 2>/dev/null || echo "  ok"
+              cat /tmp/out.json
+              echo
             fi
           done
