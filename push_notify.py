@@ -141,13 +141,21 @@ TYPES = [
     ("ca", ["獨木舟"]),
 ]
 
+# 全套 sport_key -> 顯示名(同 app 個 SPORTS 一致;漏咗嘅話
+# push 標題會出返個英文 raw key,好肉酸)
 SPORT_LABEL = {
     "football": "⚽ 足球", "tennis": "🎾 網球", "badminton": "🏸 羽毛球",
     "basketball": "🏀 籃球", "tabletennis": "🏓 乒乓球", "squash": "🎯 壁球",
-    "volleyball": "🏐 排球", "pickleball": "🥒 匹克球", "climbing": "🧗 攀登牆",
+    "volleyball": "🏐 排球", "baseball": "⚾ 棒球",
+    "archery": "🏹 箭藝", "pickleball": "🥒 匹克球", "climbing": "🧗 攀登牆",
     "golf": "⛳ 高爾夫球", "lawnbowls": "🎳 草地滾球", "gateball": "🥎 門球",
     "handball": "🤾 手球", "netball": "🏐 投球", "billiards": "🎱 桌球",
-    "cricket": "🏏 板球", "surfing": "🏄 滑浪風帆", "windsurf": "⛵ 風帆",
+    "cricket": "🏏 板球", "hockey": "🏑 曲棍球", "rollerhockey": "🛼 滾軸曲棍球",
+    "rugby": "🏉 橄欖球", "kinball": "🏐 健球", "korfball": "🏐 合球",
+    "dodgeball": "🥏 躲避盤/閃避球", "tchoukball": "🏐 巧固球",
+    "dance": "💃 舞蹈", "multi": "🏟️ 多用途活動", "ropenet": "🪢 繩網活動",
+    "trackcycle": "🚴 場地單車", "amphitheatre": "🎭 露天劇場",
+    "surfing": "🏄 滑浪風帆", "windsurf": "⛵ 風帆", "canoe": "🛶 獨木舟",
 }
 
 # 健身器材/健身室係「入場制」,冇人會監測;月票/套票係優惠組合產品。
