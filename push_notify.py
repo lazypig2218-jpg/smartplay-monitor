@@ -51,93 +51,108 @@ sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 # ─────────────────────────────────────────────────────────────
 TYPES = [
     # football
-    ("fb_free",     ["免費足球"]),
-    ("fb_us",       ["美式足球"]),
+    ("fb_us", ["美式足球"]),
     ("fb_standard", ["標準足球場"]),
-    ("fb_turf_sm",  ["小型人造草地足球"]),
-    ("fb_turf",     ["人造草地足球"]),
-    ("fb_7",        ["七人硬地足球"]),
-    ("fb_5",        ["五人硬地足球"]),
-    ("fb_small",    ["小型足球場"]),
+    ("fb_turf_sm", ["小型人造草地足球"]),
+    ("fb_turf", ["人造草地足球"]),
+    ("fb_7", ["七人硬地足球"]),
+    ("fb_5", ["五人硬地足球"]),
+    ("fb_small", ["小型足球場"]),
     # tennis
     ("tn_free_prac", ["免費網球場練習場"]),
-    ("tn_prac",      ["網球練習場"]),
-    ("tn_hard",      ["硬地網球場"]),
-    ("tn_court",     ["網球場"]),
-    ("tn_main",      ["網球主場"]),
+    ("tn_prac", ["網球練習場"]),
+    ("tn_hard", ["硬地網球場"]),
+    ("tn_court", ["網球場"]),
+    ("tn_main", ["網球主場"]),
     # badminton
-    ("bd_free", ["免費羽毛球"]),
     ("bd_out", ["戶外羽毛球"]),
-    ("bd_ac",  ["羽毛球場 (空調)"]),
-    ("bd_in",  ["羽毛球場"]),
+    ("bd_ac", ["羽毛球場 (空調)"]),
+    ("bd_in", ["羽毛球場"]),
     # basketball
-    ("bk_free", ["免費籃球"]),
     ("bk_prac", ["籃球場練習場"]),
-    ("bk_out",  ["戶外籃球"]),
-    ("bk_ac",   ["籃球場 (空調)"]),
-    ("bk_in",   ["籃球場"]),
-    # table tennis
-    ("tt_free",    ["免費乒乓球"]),
+    ("bk_out", ["戶外籃球"]),
+    ("bk_ac", ["籃球場 (空調)"]),
+    ("bk_in", ["籃球場"]),
+    # tabletennis
     ("tt_machine", ["乒乓球檯及發球機"]),
-    ("tt_ac",      ["乒乓球檯 (空調)"]),
-    ("tt_noac",    ["乒乓球檯 (無空調)"]),
-    ("tt_other",   ["乒乓球檯"]),
+    ("tt_ac", ["乒乓球檯 (空調)"]),
+    ("tt_noac", ["乒乓球檯 (無空調)"]),
+    ("tt_other", ["乒乓球檯"]),
     # squash
-    ("sq_ac",   ["壁球場 (空調)"]),
-    ("sq_in",   ["壁球場"]),
+    ("sq_ac", ["壁球場 (空調)"]),
+    ("sq_in", ["壁球場"]),
     ("sq_show", ["壁球表演場"]),
     # volleyball
-    ("vb_beach_free", ["免費沙灘排球"]),
-    ("vb_free",       ["免費排球"]),
     ("vb_beach", ["沙灘排球"]),
-    ("vb_out",   ["戶外排球"]),
-    ("vb_ac",    ["排球場 (空調)"]),
-    ("vb_in",    ["排球場"]),
+    ("vb_out", ["戶外排球"]),
+    ("vb_ac", ["排球場 (空調)"]),
+    ("vb_in", ["排球場"]),
     # baseball
-    ("bb_free", ["免費棒球"]),
     ("bb_prac", ["棒球練習場"]),
-    ("bb",      ["棒球"]),
-    # 其他陸上
-    ("ar_free", ["免費箭藝"]),
-    ("ar",      ["箭藝"]),
+    ("bb", ["棒球"]),
+    # archery
+    ("ar", ["箭藝"]),
+    # pickleball
     ("pk_free", ["戶外匹克球場 (不收費)"]),
-    ("pk_out",  ["匹克球"]),
-    ("cl_free", ["免費攀登"]),
-    ("cl_out",  ["攀登"]),
-    ("gf_tee",  ["高爾夫"]),
-    ("lb_in",   ["室內草地滾球"]),
-    ("lb_out",  ["草地滾球"]),
+    ("pk_out", ["匹克球"]),
+    # climbing
+    ("cl_out", ["戶外運動攀登"]),
+    ("cl_boulder", ["運動攀登設施"]),
+    ("cl_other", ["攀登"]),
+    # golf
+    ("gf_tee", ["高爾夫"]),
+    # lawnbowls
+    ("lb_in", ["室內草地滾球"]),
+    ("lb_out", ["草地滾球"]),
+    # gateball
     ("gb_free", ["免費門球場"]),
-    ("gb",      ["門球"]),
-    ("hb_beach",["沙灘手球"]),
-    ("hb_free", ["免費手球"]),
-    ("hb",      ["手球"]),
-    ("nb_free", ["免費投球"]),
-    ("nb",      ["投球"]),
-    ("bl_us",    ["美式桌球"]),
-    ("bl_uk",    ["英式桌球"]),
+    ("gb", ["門球"]),
+    # handball
+    ("hb_beach", ["沙灘手球"]),
+    ("hb_out", ["戶外手球"]),
+    ("hb", ["手球"]),
+    # netball
+    ("nb_out", ["戶外投球"]),
+    ("nb", ["投球"]),
+    # billiards
+    ("bl_us", ["美式桌球"]),
+    ("bl_uk", ["英式桌球"]),
     ("bl_crown", ["克朗桌球"]),
-    ("ck_free", ["免費板球"]),
+    # cricket
     ("ck_prac", ["板球練習場"]),
     ("ck_hard", ["硬地板球"]),
-    ("ck",      ["板球"]),
+    ("ck", ["板球"]),
+    # rollerhockey
+    ("rh", ["滾軸曲棍球"]),
+    # hockey
     ("hk_turf", ["人造草地曲棍球"]),
-    ("hk",      ["曲棍球"]),
-    ("rh",      ["滾軸曲棍球"]),
-    ("rg",      ["橄欖球"]),
-    ("kb",      ["健球"]),
-    ("kf",      ["合球"]),
-    ("db1",     ["閃避球"]),
-    ("db2",     ["躲避盤"]),
-    ("tb",      ["巧固球"]),
-    ("dn",      ["舞蹈"]),
-    ("mu",      ["多用途活動", "活動室"]),
-    ("rn",      ["繩網"]),
-    ("tc",      ["場地單車"]),
-    ("amp",     ["露天劇場"]),
-    # 水上(「滑浪」要排喺「風帆」前)
+    ("hk", ["曲棍球"]),
+    # rugby
+    ("rg", ["橄欖球"]),
+    # kinball
+    ("kb", ["健球"]),
+    # korfball
+    ("kf", ["合球"]),
+    # dodgeball
+    ("db1", ["閃避球"]),
+    ("db2", ["躲避盤"]),
+    # tchoukball
+    ("tb", ["巧固球"]),
+    # dance
+    ("dn", ["舞蹈"]),
+    # multi
+    ("mu", ["多用途活動", "活動室"]),
+    # ropenet
+    ("rn", ["繩網"]),
+    # trackcycle
+    ("tc", ["場地單車"]),
+    # amphitheatre
+    ("amp", ["露天劇場"]),
+    # surfing
     ("sf", ["滑浪"]),
+    # windsurf
     ("ws", ["風帆"]),
+    # canoe
     ("ca", ["獨木舟"]),
 ]
 
@@ -166,27 +181,26 @@ HIDDEN = ["月票", "套票", "健身器材", "健身室"]
 #   因為 session 冇 sport_key,唔篩 = match 曬所有運動。空就 fallback
 #   落嗰個運動全部細項,收窄返。
 SPORT_TYPES = {
-    "football": ["fb_free", "fb_us", "fb_standard", "fb_turf_sm", "fb_turf",
-                 "fb_7", "fb_5", "fb_small"],
+    "football": ["fb_us", "fb_standard", "fb_turf_sm", "fb_turf", "fb_7", "fb_5", "fb_small"],
     "tennis": ["tn_free_prac", "tn_prac", "tn_hard", "tn_court", "tn_main"],
-    "badminton": ["bd_free", "bd_out", "bd_ac", "bd_in"],
-    "basketball": ["bk_free", "bk_prac", "bk_out", "bk_ac", "bk_in"],
-    "tabletennis": ["tt_free", "tt_machine", "tt_ac", "tt_noac", "tt_other"],
+    "badminton": ["bd_out", "bd_ac", "bd_in"],
+    "basketball": ["bk_prac", "bk_out", "bk_ac", "bk_in"],
+    "tabletennis": ["tt_machine", "tt_ac", "tt_noac", "tt_other"],
     "squash": ["sq_ac", "sq_in", "sq_show"],
-    "volleyball": ["vb_beach_free", "vb_free", "vb_beach", "vb_out", "vb_ac", "vb_in"],
-    "baseball": ["bb_free", "bb_prac", "bb"],
-    "archery": ["ar_free", "ar"],
+    "volleyball": ["vb_beach", "vb_out", "vb_ac", "vb_in"],
+    "baseball": ["bb_prac", "bb"],
+    "archery": ["ar"],
     "pickleball": ["pk_free", "pk_out"],
-    "climbing": ["cl_free", "cl_out"],
+    "climbing": ["cl_out", "cl_boulder", "cl_other"],
     "golf": ["gf_tee"],
     "lawnbowls": ["lb_in", "lb_out"],
     "gateball": ["gb_free", "gb"],
-    "handball": ["hb_beach", "hb_free", "hb"],
-    "netball": ["nb_free", "nb"],
+    "handball": ["hb_beach", "hb_out", "hb"],
+    "netball": ["nb_out", "nb"],
     "billiards": ["bl_us", "bl_uk", "bl_crown"],
-    "cricket": ["ck_free", "ck_prac", "ck_hard", "ck"],
-    "hockey": ["hk_turf", "hk"],
+    "cricket": ["ck_prac", "ck_hard", "ck"],
     "rollerhockey": ["rh"],
+    "hockey": ["hk_turf", "hk"],
     "rugby": ["rg"],
     "kinball": ["kb"],
     "korfball": ["kf"],
