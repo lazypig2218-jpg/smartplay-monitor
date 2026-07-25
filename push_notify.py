@@ -245,8 +245,6 @@ def parse_ts(s):
 # ─────────────────────────────────────────────────────────────
 def matches(watch, s) -> bool:
     """一條 session 啱唔啱一條 watch?"""
-    if not s.get("bookable"):
-        return False
     if is_hidden(s.get("fat_name")):
         return False
 
@@ -379,13 +377,19 @@ def main():
         expire()
         return
 
+    # 只攞「今日開放」嘅場 —— rel_datetime 係康文署寫明幾時重新開放。
+    # (存落 DB 嗰陣冇帶時區,所以直接當 UTC 日界線嚟切就啱。)
+    rel_lo = now_hk.strftime("%Y-%m-%dT00:00:00Z")
+    rel_hi = (now_hk + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+
     sessions = []
     PAGE = 1000
     frm = 0
     while True:
         rows = (sb.table("sessions").select("*")
                 .in_("ssn_date", all_dates)
-                .eq("bookable", True)
+                .gte("rel_datetime", rel_lo)
+                .lt("rel_datetime", rel_hi)
                 .range(frm, frm + PAGE - 1).execute().data or [])
         sessions.extend(rows)
         if len(rows) < PAGE:
@@ -418,12 +422,15 @@ def main():
             if not matches(w, s):
                 continue
             seen = parse_ts(s.get("first_seen_at"))
-            # ★ 只 push「今日先放出嚟」嘅場 —— 兩重篩,同 app countMatches 一致:
-            #   1. 監測建立之後先出現(唔好一 save 就將舊 release 全部 push)
-            #   2. first_seen 係香港今日(舊 release 好大機會已經俾人訂走,
-            #      通知出去只會嘥用戶時間,只報今日新放先有搶場價值)
+            rel = parse_ts(s.get("rel_datetime"))
+            # ★ 只 push「今日開放」嘅場,兩重篩(同 app countMatches 一致):
+            #   1. rel_datetime = 今日 —— 康文署寫明幾時重新開放,呢個
+            #      先係「今日 07:00 搶得到」嘅定義。
+            #      ⚠ 唔可以用 bookable:未到開放時間嘅場一律 false,
+            #        而我哋凌晨 scrape,用佢做條件會篩走晒今日所有新場。
+            #   2. 監測建立之後先出現(唔好一 save 就將舊 release 全部 push)
             is_old = created and seen and seen < created
-            is_today = seen and seen.astimezone(HK).date() == now_hk.date()
+            is_today = rel is not None and rel.date() == now_hk.date()
             if is_old or not is_today:
                 # 唔符合:記低當已處理(下次唔使再 check),但唔 push
                 new_hits.append({"watch_id": w["id"],
@@ -444,7 +451,7 @@ def main():
         if len(venues) > 2:
             head += f" 等 {len(venues)} 個場"
         dpart = "、".join(d[5:].replace("-", "/") for d in dates[:3])
-        body = f"{head} · {dpart} 有人退場,快啲去訂!"
+        body = f"{head} · {dpart} 今日開放,快啲去搶!"
 
         print(f"  📣 {title} -> {head}")
 
