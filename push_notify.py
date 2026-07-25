@@ -24,8 +24,9 @@ SmartPlay 監測 —— push 通知
   SUPABASE_SERVICE_KEY
 
 參數:
-  --hour N   當作而家係香港時間 N 點(測試用)
-  --all      唔理用戶設定嘅時間,全部都 push(手動 trigger 用)
+  --hour N     當作而家係香港時間 N 點(測試用)
+  --minute N   當作而家係 N 分（測試用）
+  --all        唔理用戶設定嘅時間,全部都 push(手動 trigger 用)
 """
 
 import os
@@ -320,11 +321,17 @@ def main():
 
     # 而家係香港幾點(可以用 --hour 覆蓋嚟測試)
     hour = now_hk.hour
+    # 分鐘對齊到 15 分鐘一格 -- cron 每 15 分鐘跑,但 GitHub Actions
+    # 成日遲幾分鐘開工(例:06:45 嘅 job 06:49 先跑),唔對齊就會同
+    # 用戶設定嘅 45 對唔上,成批人收唔到。
+    minute = (now_hk.minute // 15) * 15
     push_all = "--all" in sys.argv
     if "--hour" in sys.argv:
         hour = int(sys.argv[sys.argv.index("--hour") + 1])
+    if "--minute" in sys.argv:
+        minute = int(sys.argv[sys.argv.index("--minute") + 1])
 
-    print(f"=== push 通知 · 香港 {now_hk:%Y-%m-%d} {hour:02d} 點"
+    print(f"=== push 通知 · 香港 {now_hk:%Y-%m-%d} {hour:02d}:{minute:02d}"
           f"{' (--all)' if push_all else ''} ===\n")
 
     # 1. enabled 嘅 watches
@@ -338,7 +345,7 @@ def main():
 
     # 2. 用戶 push token + 佢哋揀咗幾點收
     uids = list({w["user_id"] for w in watches})
-    users = (sb.table("app_users").select("id, push_token, push_hour")
+    users = (sb.table("app_users").select("id, push_token, push_hour, push_minute")
              .in_("id", uids).execute().data or [])
 
     # ★ 只服務「而家啱啱係佢設定時間」嗰班人
@@ -346,14 +353,20 @@ def main():
     for u in users:
         if not u.get("push_token"):
             continue
-        if push_all or (u.get("push_hour", 6) == hour):
+        u_hour = u.get("push_hour")
+        u_min = u.get("push_minute")
+        if u_hour is None:
+            u_hour = 6
+        if u_min is None:
+            u_min = 45
+        if push_all or (u_hour == hour and u_min == minute):
             token_of[u["id"]] = u["push_token"]
 
     if not token_of:
-        print(f"冇人揀咗 {hour:02d} 點收通知,收工。")
+        print(f"冇人揀咗 {hour:02d}:{minute:02d} 收通知,收工。")
         expire()
         return
-    print(f"{len(token_of)} 個用戶揀咗 {hour:02d} 點收")
+    print(f"{len(token_of)} 個用戶揀咗 {hour:02d}:{minute:02d} 收")
 
     # 唔關呢個鐘事嘅 watch,今次唔使理
     watches = [w for w in watches if w["user_id"] in token_of]
